@@ -4,6 +4,7 @@
 -module(index).
 -include_lib("eunit/include/eunit.hrl").
 -export([index/1, main/1, display_index/1]).
+-export([normalize/1]).
   
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%% Indexing %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -15,23 +16,44 @@ index(FileName) ->
 
 % Index the contents of the file.
 index_contents(Contents) ->
-    alphabetize_index(index_contents(0, filter_stop_words(normalize(tokenize(Contents))), [], [])).
+    index_contents(0, filter_stop_words(normalize(tokenize(Contents))), [], []).
 
 % Turn list of string into list of list of string i.e.:
 % from ["The first sentence.", "The second sentence."]
 % into [["The", "first", "sentence."], ["The", "second", "sentence."].
 tokenize(Contents) ->
-    lists:map(fun(Line) -> string:tokens(Line, " ") end, Contents).
+    [string:tokens(Line, " ") || Line <- Contents].
+
+% Function to convert word to lowercase and remove punctuation with
+% excpetion of apostrophe in a contraction.
+normalize_word([$'|Word]) ->
+    normalize_word0(Word);
+normalize_word(Word) ->
+    normalize_word0(Word).
+
+normalize_word0([]) ->
+    [];
+normalize_word0([Char|Suffix]) when Char >= $A andalso Char =< $Z ->
+    [Char+32|normalize_word0(Suffix)];
+normalize_word0([Char|Suffix]) when Char >= $a andalso Char =< $z ->
+    [Char|normalize_word0(Suffix)];
+normalize_word0([$']) ->
+    [];
+normalize_word0([$'|Suffix]) ->
+    NextChar = hd(Suffix),
+    if
+        NextChar >= $A andalso NextChar =< $Z -> [$'|normalize_word0(Suffix)];
+        NextChar >= $a andalso NextChar =< $z -> [$'|normalize_word0(Suffix)];
+        true -> normalize_word0(Suffix)
+    end;
+normalize_word0([_Char|Suffix]) ->
+    normalize_word0(Suffix).
 
 % Convert words into lowercase and remove extraneous punctuation.
 normalize([]) ->
     [];
 normalize([Line|Lines]) ->
-    Punctuation = [33, 34, 35, 36, 37, 38, 40, 41, 42, 43, 44, 46, 47,
-                   58, 59, 60, 61, 62, 63, 64, 91, 92, 93, 94, 96],
-    RemovePunctuation = fun(Char) -> not lists:member(Char, Punctuation) end,
-    NormalizeWord = fun(Word) -> string:to_lower(lists:filter(RemovePunctuation, Word)) end,
-    [lists:map(NormalizeWord, Line)|normalize(Lines)].
+    [[normalize_word(Word) || Word <- Line]|normalize(Lines)].
 
 % Removes words less than length of 3 and any words listed in stopwords.txt.
 filter_stop_words(Lines) ->
@@ -68,8 +90,10 @@ insert(LineNumber, Word, [{Word, [{Start,End}|LineEntries]}|Indices]) ->
         true -> [{Word, [{Start,LineNumber}|LineEntries]}|Indices];
         false -> [{Word, [{LineNumber, LineNumber}|[{Start,End}|LineEntries]]}|Indices]
     end;
-insert(LineNumber, Word, [{OtherWord, LineEntries}|Indices]) ->
-    [{OtherWord, LineEntries}|insert(LineNumber, Word, Indices)].
+insert(LineNumber, Word, [{OtherWord, LineEntries}|Indices]) when Word > OtherWord ->
+    [{OtherWord, LineEntries}|insert(LineNumber, Word, Indices)];
+insert(LineNumber, Word, [{OtherWord, _LineEntries}|_Indices]=IndexEntries) when Word < OtherWord ->
+    [{Word, [{LineNumber, LineNumber}]}|IndexEntries].
     
 % Function to reverse all the line numbers in the index because they
 % were built in reverse.
@@ -77,11 +101,6 @@ reverse_line_number_entries([]) ->
     [];
 reverse_line_number_entries([{Word, LineNumbers}|Tail]) ->
     [{Word, lists:reverse(LineNumbers)}|reverse_line_number_entries(Tail)].
-
-% Function to alphabetize the index.
-alphabetize_index(Index) ->
-    Compare = fun({Word1, _}, {Word2, _}) -> Word1 < Word2 end,
-    lists:sort(Compare, Index).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%% Template %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -123,7 +142,6 @@ show_file_contents([L|Ls]) ->
 
 main([FileName]) ->
     try
-        io:format("Indexing ~s ... ~n", [FileName]),
         Index = index(FileName),
         display_index(Index)
     catch
@@ -154,6 +172,13 @@ tokenize_test() ->
                 ["But", "this", "sentence", "does."]
                ],
     ?assert(tokenize(Contents) == Expected).
+
+normalize_word_test() ->
+    [?assert(normalize_word("HELLO") == "hello"),
+     ?assert(normalize_word("'Hello'") == "hello"),
+     ?assert(normalize_word("can't'") == "can't"),
+     ?assert(normalize_word("Hello!") == "hello")
+    ].
 
 normalize_test() ->
     Tokens = [["This", "is", "a", "sentence", "that", "contains", "the", "word", "sentence."],
