@@ -1,14 +1,13 @@
-% Future Learn Function Programming in Erlang :: Assignment 2
+% Future Learn :: Functional Programming in Erlang :: Assignment 2
 % @author jramaswami
+% A github gist of this is available at:
+% https://gist.github.com/jramaswami/9e0b82f77a632f049bff771ebf14a034
 
 -module(index).
 -include_lib("eunit/include/eunit.hrl").
--export([index/1, main/1, display_index/1]).
--export([normalize/1]).
+-export([index/1, main/1]).
   
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%% Indexing %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-% Functions for indexing.
 
 % Function to call to index given file.
 index(FileName) ->
@@ -25,7 +24,7 @@ tokenize(Contents) ->
     [string:tokens(Line, " ") || Line <- Contents].
 
 % Function to convert word to lowercase and remove punctuation with
-% excpetion of apostrophe in a contraction.
+% exception of apostrophe in a contraction.
 normalize_word([$'|Word]) ->
     normalize_word0(Word);
 normalize_word(Word) ->
@@ -57,7 +56,7 @@ normalize([Line|Lines]) ->
 
 % Removes words less than length of 3 and any words listed in stopwords.txt.
 filter_stop_words(Lines) ->
-    Stop = load_stop_words(),
+    Stop = stop_words(),
     filter_stop_words(Stop, Lines).
 filter_stop_words(_, []) ->
     [];
@@ -65,11 +64,51 @@ filter_stop_words(Stop, [Line|Lines]) ->
     FilterStops = fun(Word) -> length(Word) > 2 andalso (not lists:member(Word, Stop)) end,
     [lists:filter(FilterStops, Line)|filter_stop_words(Stop, Lines)].
 
-% Load stop words from stopwords.txt into a list.
-load_stop_words() ->
-    {ok,File} = file:open("stopwords.txt",[read]),
-    Rev = get_all_lines(File,[]),
-    lists:reverse(Rev).
+stop_words() ->
+      ["a", "about", "above", "above", "across", "after", "afterwards", 
+       "again", "against", "all", "almost", "alone", "along", "already", 
+       "also","although","always","am","among", "amongst", "amoungst", 
+       "amount",  "an", "and", "another", "any","anyhow","anyone",
+       "anything","anyway", "anywhere", "are", "around", "as",  "at", 
+       "back","be","became", "because","become","becomes", "becoming", 
+       "been", "before", "beforehand", "behind", "being", "below", "beside", 
+       "besides", "between", "beyond", "bill", "both", "bottom","but", "by", 
+       "call", "can", "cannot", "cant", "co", "con", "could", "couldnt", 
+       "cry", "de", "describe", "detail", "do", "done", "down", "due", 
+       "during", "each", "eg", "eight", "either", "eleven","else", 
+       "elsewhere", "empty", "enough", "etc", "even", "ever", "every", 
+       "everyone", "everything", "everywhere", "except", "few", "fifteen", 
+       "fify", "fill", "find", "fire", "first", "five", "for", "former", 
+       "formerly", "forty", "found", "four", "from", "front", "full", 
+       "further", "get", "give", "go", "had", "has", "hasnt", "have", 
+       "he", "hence", "her", "here", "hereafter", "hereby", "herein", 
+       "hereupon", "hers", "herself", "him", "himself", "his", "how", 
+       "however", "hundred", "ie", "if", "in", "inc", "indeed", "interest", 
+       "into", "is", "it", "its", "itself", "keep", "last", "latter", 
+       "latterly", "least", "less", "ltd", "made", "many", "may", "me", 
+       "meanwhile", "might", "mill", "mine", "more", "moreover", "most", 
+       "mostly", "move", "much", "must", "my", "myself", "name", "namely", 
+       "neither", "never", "nevertheless", "next", "nine", "no", "nobody", 
+       "none", "noone", "nor", "not", "nothing", "now", "nowhere", "of", 
+       "off", "often", "on", "once", "one", "only", "onto", "or", "other", 
+       "others", "otherwise", "our", "ours", "ourselves", "out", "over", 
+       "own","part", "per", "perhaps", "please", "put", "rather", "re", 
+       "same", "see", "seem", "seemed", "seeming", "seems", "serious", 
+       "several", "she", "should", "show", "side", "since", "sincere", 
+       "six", "sixty", "so", "some", "somehow", "someone", "something", 
+       "sometime", "sometimes", "somewhere", "still", "such", "system", 
+       "take", "ten", "than", "that", "the", "their", "them", "themselves", 
+       "then", "thence", "there", "thereafter", "thereby", "therefore", 
+       "therein", "thereupon", "these", "they", "thickv", "thin", "third", 
+       "this", "those", "though", "three", "through", "throughout", "thru", 
+       "thus", "to", "together", "too", "top", "toward", "towards", "twelve", 
+       "twenty", "two", "un", "under", "until", "up", "upon", "us", "very", 
+       "via", "was", "we", "well", "were", "what", "whatever", "when", 
+       "whence", "whenever", "where", "whereafter", "whereas", "whereby", 
+       "wherein", "whereupon", "wherever", "whether", "which", "while", 
+       "whither", "who", "whoever", "whole", "whom", "whose", "why", "will", 
+       "with", "within", "without", "would", "yet", "you", "your", "yours", 
+       "yourself", "yourselves"].
 
 % Does the actual work of indexing ...
 index_contents(_, [], [], Acc) ->
@@ -128,17 +167,10 @@ get_all_lines(File,Partial) ->
                 get_all_lines(File,[Strip|Partial])
     end.
 
-% Show the contents of a list of strings.
-% Can be used to check the results of calling get_file_contents.
-show_file_contents([L|Ls]) ->
-    io:format("~s~n",[L]),
-    show_file_contents(Ls);
- show_file_contents([]) ->
-    ok.    
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%% Main %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% Functions to run as escript
+% Functions to run from command line:
+% erl -noshell -s index main <FileName> -s init stop
 
 main([FileName]) ->
     try
