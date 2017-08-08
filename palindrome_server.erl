@@ -1,7 +1,7 @@
 -module(palindrome_server).
--export([server/1, server/0, forwarder/2]).
+-export([server/1, server/0, forwarder/2, replicator/0]).
 
-% A palindrome checking server
+% A palindrome checking server:
 % Define a function server/1 that accepts messages of the form
 %               {check,"Madam I\'m Adam"}
 % and returns results like
@@ -11,6 +11,9 @@
 % the server should stop, by terminating its operation. The 
 % argument to server/1 should be the Pid of the process to which 
 % results are to be returned.
+%
+% Makes use of previous assignment's function to check if a string
+% is a palindrome in palindrome.erl.
 server(Caller) ->
     receive
         {check, P} ->
@@ -23,7 +26,7 @@ server(Caller) ->
             ok
     end.
 
-% Modifying your server
+% Modifying your server:
 % Can you modify the definition of your server to take requests from multiple
 % clients? For this to work, each client will need to pass its Pid as part of
 % each message, and the server will have to extract that information as the
@@ -57,3 +60,38 @@ forwarder(Parent, PalindromeServer) ->
             ok
     end.
 
+% Replicating the server:
+% Suppose that you need to replicate the server because of the volume of
+% traffic.  One way of doing this is to put in place a front end which
+% distributes work to the two servers, which then return their results 
+% directly to the clients.
+%
+% Note this implementation rotates the servers.
+replicator() ->
+    receive
+        {check, P, Caller} ->
+            Server1 = spawn(?MODULE, server, []),
+            io:format("Spawning palindrome checker ~w~n", [Server1]),
+            Server1 ! {check, P, Caller},
+            replicator([Server1]);
+        stop ->
+            ok
+    end.
+replicator([Server1]) ->
+    receive
+        {check, P, Caller} ->
+            Server2 = spawn(?MODULE, server, []),
+            io:format("Spawning palindrome checker ~w~n", [Server2]),
+            Server2 ! {check, P, Caller},
+            replicator([Server1, Server2]);
+        stop ->
+            ok
+    end;
+replicator([Server1, Server2]) ->
+    receive
+        {check, P, Caller} ->
+            Server1 ! {check, P, Caller},
+            replicator([Server2, Server1]);
+        stop ->
+            ok
+    end.
