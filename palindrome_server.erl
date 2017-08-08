@@ -31,24 +31,29 @@ server(Caller) ->
 server() ->
     receive
         {check, P, Caller} ->
+            io:format("Palindrome Server ~w: checking ~s for ~w~n", [self(), P, Caller]),
             case palindrome:palindrome(P) of
                 false -> Caller ! {result, "\"" ++ P ++ "\" is not a palindrome."};
                 true -> Caller ! {result, "\"" ++ P ++ "\" is a palindrome."}
             end,
             server();
         stop ->
+            io:format("Palindrome Server ~w: stopping~n", [self()]),
             ok
     end.
 
 forwarder(Parent, PalindromeServer) ->
     receive
         {forward, P} ->
+            io:format("Forwarder ~w: forwarding palindrome \"~s\" to palindrome server~n", [self(), P]),
             PalindromeServer ! {check, P, self()},
             forwarder(Parent, PalindromeServer);
         {result, S} ->
+            io:format("Forwarder ~w: forwarding result \"~s\" to parent ~w~n", [self(), S, Parent]),
             Parent ! {forwarded_result, S},
             forwarder(Parent, PalindromeServer);
         stop ->
+            io:format("Forwarder ~w: stopping~n", [self()]),
             ok
     end.
 
