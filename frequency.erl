@@ -1,94 +1,131 @@
-%% Based on code from 
-%%   Erlang Programming
-%%   Francecso Cesarini and Simon Thompson
-%%   O'Reilly, 2008
-%%   http://oreilly.com/catalog/9780596518189/
-%%   http://www.erlangprogramming.org/
-%%   (c) Francesco Cesarini and Simon Thompson
+% Future Learn :: Concurrent Programming in Erlang :: Frequency Server
 
--module(frequency_hardened).
--export([start/0,allocate/0,deallocate/1,stop/0]).
--export([init/0]).
+-module(frequency).
+-export([init/0, start/0, allocate/0, deallocate/1, stop/0]).
+-export([overloaded_init/1, overloaded_start/1, allocate/1, deallocate/2]).
 
-%% These are the start functions used to create and
-%% initialize the server.
+% Allocate a frequency, if possible.
+alloc({[], Allocated}, _Pid) ->
+    {{[], Allocated}, {error, no_frequency}};
+alloc({[Freq|Free], Allocated}, Pid) ->
+    {{Free, [{Freq, Pid}|Allocated]}, {ok, Freq}}.
 
-start() ->
-    register(frequency,
-	     spawn(?MODULE, init, [])).
+% Deallocate frequency for the given Pid only if
+% the frequency was allocated to that Pid.
+dealloc({Free, Allocated}, {Freq, Pid}) ->
+    {NewAllocated, Reply} = dealloc(Allocated, {Freq, Pid}, [], 0),
+    case Reply of 
+        ok -> {{[Freq|Free], NewAllocated}, Reply};
+        no_allocated_match -> {{Free, Allocated}, Reply}
+    end.
 
+% Helper function for deallocating frequency.
+dealloc([], {_Freq, _Pid}, NewAllocated, N) ->
+    case N == 0 of
+        true -> {lists:reverse(NewAllocated), no_allocated_match};
+        false -> {lists:reverse(NewAllocated), ok}
+    end;
+dealloc([{Freq, Pid}|Allocated], {Freq, Pid}, NewAllocated, N) ->
+    dealloc(Allocated, {Freq, Pid}, NewAllocated, N+1);
+dealloc([{Freq, P}|Allocated], {Freq, Pid}, NewAllocated, N) ->
+    dealloc(Allocated, {Freq, Pid}, [{Freq, P}|NewAllocated], N);
+dealloc([{F, Pid}|Allocated], {Freq, Pid}, NewAllocated, N) ->
+    dealloc(Allocated, {Freq, Pid}, [{F, Pid}|NewAllocated], N);
+dealloc([{F, P}|Allocated], {Freq, Pid}, NewAllocated, N) ->
+    dealloc(Allocated, {Freq, Pid}, [{F, P}|NewAllocated], N).
+
+% Event loop.
+loop(Frequencies) ->
+    io:format("#Log (loop): frequencies = ~w~n", [Frequencies]),
+    receive
+        {request, Pid, allocate} ->
+            {NewFrequencies, Reply} = alloc(Frequencies, Pid),
+            Pid ! {reply, Reply},
+            loop(NewFrequencies);
+        {request, Pid, {deallocate, Freq}} ->
+            {NewFrequencies, Reply} = dealloc(Frequencies, {Freq, Pid}),
+            Pid ! {reply, Reply},
+            loop(NewFrequencies);
+        {request, Pid, stop} ->
+            Pid ! {reply, stopped}
+    end. 
+
+% Intialize the event loop with initial set of frequencies.
 init() ->
-  process_flag(trap_exit, true),    %%% ADDED
-  Frequencies = {get_frequencies(), []},
-  loop(Frequencies).
+    Frequencies = {get_frequencies(), []},
+    loop(Frequencies).
 
-% Hard Coded
+% Retrieve initial frequencies.
 get_frequencies() -> [10,11,12,13,14,15].
 
-%% The Main Loop
+% Registers and spawns frequency server.
+start() ->
+    register(frequency, spawn(?MODULE, init, [])).
 
-loop(Frequencies) ->
-  receive
-    {request, Pid, allocate} ->
-      {NewFrequencies, Reply} = allocate(Frequencies, Pid),
-      Pid ! {reply, Reply},
-      loop(NewFrequencies);
-    {request, Pid , {deallocate, Freq}} ->
-      NewFrequencies = deallocate(Frequencies, Freq),
-      Pid ! {reply, ok},
-      loop(NewFrequencies);
-    {request, Pid, stop} ->
-      Pid ! {reply, stopped};
-    {'EXIT', Pid, _Reason} ->                   %%% CLAUSE ADDED
-      NewFrequencies = exited(Frequencies, Pid), 
-      loop(NewFrequencies)
-  end.
+% High level API
+allocate() ->
+    allocate(500).
 
-%% Functional interface
-
-allocate() -> 
+allocate(Wait) ->
+    clear(),
     frequency ! {request, self(), allocate},
-    receive 
-      {reply, Reply} -> Reply;
-      _              -> ok
+    receive
+        {reply, Reply} -> Reply
+    after Wait ->
+              timeout
     end.
 
-deallocate(Freq) -> 
+deallocate(Freq) ->
+    deallocate(Freq, 500).
+
+deallocate(Freq, Wait) ->
+    clear(),
     frequency ! {request, self(), {deallocate, Freq}},
-    receive 
-      {reply, Reply} -> Reply;
-      _              -> ok
+    receive
+        {reply, Reply} -> Reply
+    after Wait ->
+              timeout
     end.
 
-stop() -> 
+stop() ->
+    clear(),
     frequency ! {request, self(), stop},
-    receive 
-	    {reply, Reply} -> Reply
+    receive
+        {reply, Reply} -> Reply
     end.
 
-
-%% The Internal Help Functions used to allocate and
-%% deallocate frequencies.
-
-allocate({[], Allocated}, _Pid) ->
-  {{[], Allocated}, {error, no_frequency}};
-allocate({[Freq|Free], Allocated}, Pid) ->
-  link(Pid),                                               %%% ADDED
-  {{Free, [{Freq, Pid}|Allocated]}, {ok, Freq}}.
-
-deallocate({Free, Allocated}, Freq) ->
-  {value,{Freq,Pid}} = lists:keysearch(Freq,1,Allocated),  %%% ADDED
-  unlink(Pid),                                             %%% ADDED
-  NewAllocated=lists:keydelete(Freq, 1, Allocated),
-  {[Freq|Free],  NewAllocated}.
-
-exited({Free, Allocated}, Pid) ->                %%% FUNCTION ADDED
-    case lists:keysearch(Pid,2,Allocated) of
-      {value,{Freq,Pid}} ->
-        NewAllocated = lists:keydelete(Freq,1,Allocated),
-        {[Freq|Free],NewAllocated}; 
-      false ->
-        {Free,Allocated} 
+% Clear mailbox (with non-blocking timeout).
+clear() ->
+    receive Msg -> 
+                io:format("#Log (clear): Clearing ~w~n", [Msg]), 
+                clear()
+    after 0 -> 
+              ok
     end.
 
+% "Overloaded server " event loop.
+overloaded_loop(Frequencies, Delay) ->
+    io:format("#Log (overloaded loop [~w]): frequencies = ~w~n", [Delay,Frequencies]),
+    receive
+        {request, Pid, allocate} ->
+            timer:sleep(Delay),
+            {NewFrequencies, Reply} = alloc(Frequencies, Pid),
+            Pid ! {reply, Reply},
+            overloaded_loop(NewFrequencies, Delay);
+        {request, Pid, {deallocate, Freq}} ->
+            timer:sleep(Delay),
+            {NewFrequencies, Reply} = dealloc(Frequencies, {Freq, Pid}),
+            Pid ! {reply, Reply},
+            overloaded_loop(NewFrequencies, Delay);
+        {request, Pid, stop} ->
+            Pid ! {reply, stopped}
+    end. 
 
+% Intialize the "overloaded server" event loop with initial set of frequencies.
+overloaded_init(Delay) ->
+    Frequencies = {get_frequencies(), []},
+    overloaded_loop(Frequencies, Delay).
+
+% Registers and spawns frequency server.
+overloaded_start(Delay) ->
+    register(frequency, spawn(?MODULE, overloaded_init, [Delay])).
