@@ -42,6 +42,11 @@
 % 0 echoed.
 % {<0.75.0>,1} sent.
 % 1 echoed.
+%
+% The error is caused by the fact that the talk process 
+% tries to send a message to an unregistered process
+% as the echo server has not yet been restarted
+% because of the delay.
 
 
 -module(super).
