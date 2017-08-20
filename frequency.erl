@@ -3,6 +3,46 @@
 -module(frequency).
 -export([init/0, start/0, allocate/0, deallocate/1, stop/0]).
 -export([overloaded_init/1, overloaded_start/1, allocate/1, deallocate/2]).
+-export([start_exceptions/0, exceptions_client/1]).
+
+% Functions to test changes for assignment 2.16.
+% Just run frequency:start_exceptions().
+start_exceptions() ->
+    register(frequency, spawn(?MODULE, init, [])),
+    register(client, spawn(?MODULE, exceptions_client, [[]])).
+
+exceptions_client([]) ->
+    link(whereis(frequency)),
+    io:format("Requesting frequency ...~n", []),
+    allocate(),
+    receive
+        {reply, {ok, Freq}} ->
+            exceptions_client([Freq])
+    end;
+exceptions_client([_F|_Freqs]) ->
+    io:format("Attempting to deallocate frequency 200 ...~n", []),
+    deallocate(200),
+    receive 
+        {reply, no_allocated_frequency} ->
+            io:format("Deallocation failed, as expected.~n", []);
+        Reply ->
+            io:format("Received unexpected reply ~w~n.", [Reply])
+    end,
+    io:format("Attempting to send unexpected message ... ~n", []),
+    process_flag(trap_exit, true),
+    frequency ! {request, spanish_inquisition},
+    receive
+        {'EXIT', _Pid, Reason} ->
+            io:format("Trapped frequency server exit for reason ~w.~n", [Reason]),
+            io:format("Restarting frequency server ...~n", []),
+            register(frequency, spawn(?MODULE, init, []))
+    end,
+    io:format("Requesting frequency ...~n", []),
+    allocate(),
+    io:format("Stopping frequency server ... ~n", []),
+    stop(),
+    io:format("Stopping client.~n", []).
+
 
 % Allocate a frequency, if possible.
 alloc({[], Allocated}, _Pid) ->
@@ -13,16 +53,16 @@ alloc({[Freq|Free], Allocated}, Pid) ->
 % Deallocate frequency for the given Pid only if
 % the frequency was allocated to that Pid.
 dealloc({Free, Allocated}, {Freq, Pid}) ->
-    {NewAllocated, Reply} = dealloc(Allocated, {Freq, Pid}, [], 0),
-    case Reply of 
-        ok -> {{[Freq|Free], NewAllocated}, Reply};
-        no_allocated_match -> {{Free, Allocated}, Reply}
+    try dealloc(Allocated, {Freq, Pid}, [], 0) of
+        {NewAllocated, Reply} -> {{[Freq|Free], NewAllocated}, Reply}
+    catch
+        throw:no_allocated_frequency -> throw(no_allocated_frequency)
     end.
 
 % Helper function for deallocating frequency.
 dealloc([], {_Freq, _Pid}, NewAllocated, N) ->
     case N == 0 of
-        true -> {lists:reverse(NewAllocated), no_allocated_match};
+        true -> throw(no_allocated_frequency);
         false -> {lists:reverse(NewAllocated), ok}
     end;
 dealloc([{Freq, Pid}|Allocated], {Freq, Pid}, NewAllocated, N) ->
@@ -43,11 +83,21 @@ loop(Frequencies) ->
             Pid ! {reply, Reply},
             loop(NewFrequencies);
         {request, Pid, {deallocate, Freq}} ->
-            {NewFrequencies, Reply} = dealloc(Frequencies, {Freq, Pid}),
-            Pid ! {reply, Reply},
-            loop(NewFrequencies);
+            try dealloc(Frequencies, {Freq, Pid}) of
+                {NewFrequencies, Reply} ->
+                    Pid ! {reply, Reply},
+                    loop(NewFrequencies)
+            catch
+                throw:no_allocated_frequency ->
+                    io:format("#Log (loop): caught no_allocated_frequency exception.~n", []),
+                    Pid ! {reply, no_allocated_frequency},
+                    loop(Frequencies)
+            end;
         {request, Pid, stop} ->
-            Pid ! {reply, stopped}
+            Pid ! {reply, stopped};
+        _ ->
+            io:format("#Log (loop): unexpected message, throwing exception!~n"),
+            throw(unexpected_message)
     end. 
 
 % Intialize the event loop with initial set of frequencies.
@@ -64,7 +114,7 @@ start() ->
 
 % High level API
 allocate() ->
-    allocate(500).
+    allocate(0).
 
 allocate(Wait) ->
     clear(),
@@ -76,7 +126,7 @@ allocate(Wait) ->
     end.
 
 deallocate(Freq) ->
-    deallocate(Freq, 500).
+    deallocate(Freq, 0).
 
 deallocate(Freq, Wait) ->
     clear(),
